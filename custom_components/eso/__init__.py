@@ -279,9 +279,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ESOConfigEntry) -> bool:
         date_to: datetime | None = None,
     ) -> None:
         # Mūsų namai: vienu metu tik vienas importas (bendras requests.Session).
-        if import_lock.locked():
-            _LOGGER.warning("Import already running, skipping this request")
-            return
+        # Rankinis (istorijos) kvietimas atmetamas, dienos importas palaukia eilėje.
+        if date_from is not None and import_lock.locked():
+            raise ServiceValidationError("Importas jau vyksta – palaukite, kol baigsis")
         async with import_lock:
             await _async_import_generation(now, retry, date_from, date_to)
 

@@ -76,6 +76,7 @@ class IgnitisClient:
         self.session.hooks["response"].append(_host_guard)
         self.token: str | None = None
         self._objects: list[dict] = []
+        self.last_request_failed: bool = False
 
     def login(self) -> None:
         self.dataset = {}
@@ -255,6 +256,7 @@ class IgnitisClient:
             first = last = (reference_date - timedelta(days=1)).date()
         else:
             raise ValueError("fetch needs either reference_date or date_range")
+        self.last_request_failed = False
         try:
             params = {
                 "dateFrom": first.strftime("%Y-%m-%d"),
@@ -273,6 +275,7 @@ class IgnitisClient:
             return response.json()
         except requests.exceptions.RequestException as e:
             _LOGGER.error("Ignitis fetch error: %s", _safe(e))
+            self.last_request_failed = True
             return {}
 
     def fetch_dataset(self, obj: str, date: datetime) -> dict | None:
@@ -340,7 +343,7 @@ class IgnitisClient:
                 if raw
                 else "request failed"
             )
-            failures = 0 if raw else failures + 1
+            failures = failures + 1 if self.last_request_failed else 0
             if gap:
                 _LOGGER.warning(
                     "Ignitis: chunk %s..%s is incomplete (%s)", start, end, gap

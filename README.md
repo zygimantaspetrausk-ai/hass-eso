@@ -1,7 +1,7 @@
 > **Mūsų namai kopija (fork).** Bazinis originalo commit'as: `5969af1` (algirdasc/hass-eso, 2026-10-20). Naudojamas tik Ignitis kelias.
-> Mūsų pakeitimai: ESO kelias ir pašto (IMAP) skaitymas pašalinti; užklausos leidžiamos tik į `*.ignitis.lt` (tikrinami ir nukreipimai);
-> tik https į e.ignitis.lt ir energy-smart-api.ignitis.lt; 30 s užklausų laiko riba; į žurnalą nerašomi URL, atsakymų turinys ir objektų adresai;
-> istorijos importas – tik administratoriui, ≤ 3 m. atgal, ≤ 400 d. vienu kartu, vienas importas vienu metu, stop po 3 klaidų;
+> Mūsų pakeitimai: ESO kelias ir pašto (IMAP) skaitymas pašalinti; užklausos leidžiamos tik https į e.ignitis.lt ir energy-smart-api.ignitis.lt (tikrinami ir nukreipimai);
+> 30 s užklausų laiko riba; į žurnalą nerašomi URL, atsakymų turinys ir objektų adresai;
+> istorijos importas – tik administratoriui, ≤ 3 m. atgal, ≤ 400 d. vienu kartu, vienas importas vienu metu (dienos importas laukia eilėje), stop po 3 nepavykusių užklausų;
 > išsaugotas slaptažodis nesiunčiamas į naršyklę (parinktyse tuščias laukas = nekeisti). Originalo pakeitimus peržiūrime patys
 > (savaitinė patikra) – „Sync fork“ nespausti.
 

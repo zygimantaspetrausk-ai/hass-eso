@@ -107,7 +107,7 @@
           "folder": "Mailbox folder"
         },
         "data_description": {
-          "password": "Your provider account password.",
+          "password": "Your provider account password. Leave empty to keep the saved one.",
           "auth_type": "Ignitis only. Direct posts your credentials to the Energy Smart API; Self sign portal goes through e.ignitis.lt like the mobile app does.",
           "imap_username": "The mailbox login that receives ESO 2FA codes.",
           "imap_password": "Mailbox password. For Gmail/Google use an App Password.",
