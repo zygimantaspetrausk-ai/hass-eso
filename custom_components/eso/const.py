@@ -19,8 +19,9 @@ CONF_EXPORT_BALANCE = "export_balance"
 CONF_PROVIDER = "provider"
 PROVIDER_ESO = "eso"
 PROVIDER_IGNITIS = "ignitis"
-PROVIDERS = [PROVIDER_ESO, PROVIDER_IGNITIS]
-DEFAULT_PROVIDER = PROVIDER_ESO
+# Mūsų namai kopija: tik Ignitis (ESO kelias pašalintas)
+PROVIDERS = [PROVIDER_IGNITIS]
+DEFAULT_PROVIDER = PROVIDER_IGNITIS
 
 # How the Ignitis client authenticates: "direct" posts to the Energy Smart API,
 # "sso" goes through the e.ignitis.lt web login like the mobile app does.

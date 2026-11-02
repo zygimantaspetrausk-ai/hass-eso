@@ -1,3 +1,8 @@
+> **Mūsų namai kopija (fork).** Bazinis originalo commit'as: `5969af1` (algirdasc/hass-eso, 2026-10-20). Naudojamas tik Ignitis kelias.
+> Mūsų pakeitimai: ESO kelias ir pašto (IMAP) skaitymas pašalinti; užklausos leidžiamos tik į `*.ignitis.lt` (tikrinami ir nukreipimai);
+> 30 s užklausų laiko riba; į žurnalą nerašomi adresai, atsakymų turinys ir objektų adresai. Originalo pakeitimus peržiūrime patys
+> (savaitinė patikra) – „Sync fork“ nespausti.
+
 # Your support
 This open-source project is developed in my free time.
 Your donation would help me dedicate more time and resources to improve project, add new features, fix bugs,

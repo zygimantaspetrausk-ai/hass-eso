@@ -4,6 +4,7 @@ import time
 import uuid
 from collections import Counter
 from datetime import date, datetime, timedelta
+from urllib.parse import urljoin, urlsplit
 
 import requests
 
@@ -31,6 +32,31 @@ SSO_TEMP_USER_DATAS_RE = re.compile(r"tempUserDatasId=([0-9a-fA-F-]{36})")
 
 _LOGGER = logging.getLogger(__name__)
 
+# Mūsų namai kopija: užklausų laiko riba ir leidžiami tik Ignitis adresai.
+REQUEST_TIMEOUT = 30
+
+
+def _allowed_host(url: str) -> bool:
+    host = (urlsplit(url).hostname or "").lower()
+    return host == "ignitis.lt" or host.endswith(".ignitis.lt")
+
+
+def _host_guard(response: requests.Response, *args, **kwargs) -> None:
+    """Refuse any response or redirect that leaves *.ignitis.lt."""
+    if not _allowed_host(response.url):
+        raise ESOConnectionError("Ignitis: atsakymas ne iš ignitis.lt – nutraukta")
+    if response.is_redirect:
+        target = urljoin(response.url, response.headers.get("location", ""))
+        if not _allowed_host(target):
+            raise ESOConnectionError("Ignitis: nukreipimas ne į ignitis.lt – nutraukta")
+
+
+def _safe(e: Exception) -> str:
+    """Error text without URLs (they can carry one-time tickets)."""
+    resp = getattr(e, "response", None)
+    code = getattr(resp, "status_code", None)
+    return f"{type(e).__name__}" + (f" (HTTP {code})" if code else "")
+
 
 class IgnitisClient:
     def __init__(
@@ -44,6 +70,7 @@ class IgnitisClient:
         self.auth_type: str = auth_type
         self.dataset: dict = {}
         self.session: requests.Session = requests.Session()
+        self.session.hooks["response"].append(_host_guard)
         self.token: str | None = None
         self._objects: list[dict] = []
 
@@ -62,7 +89,7 @@ class IgnitisClient:
             uoid = obj.get("uoid")
             if uoid is None:
                 continue
-            _LOGGER.info("Found object: %s, address: %s", uoid, obj.get("address"))
+            _LOGGER.debug("Found Ignitis object: %s", uoid)
             self._objects.append(
                 {"id": str(uoid), "name": obj.get("address") or str(uoid)}
             )
@@ -78,10 +105,11 @@ class IgnitisClient:
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                 },
+                timeout=REQUEST_TIMEOUT,
             )
         except requests.exceptions.RequestException as e:
-            _LOGGER.error("Ignitis login error: %s", e)
-            raise ESOConnectionError(str(e)) from e
+            _LOGGER.error("Ignitis login error: %s", _safe(e))
+            raise ESOConnectionError(_safe(e)) from e
 
     @staticmethod
     def _direct_credentials_rejected(response: requests.Response) -> bool:
@@ -105,8 +133,8 @@ class IgnitisClient:
             response.raise_for_status()
             _LOGGER.debug("Ignitis login response status: %s", response.status_code)
         except requests.exceptions.RequestException as e:
-            _LOGGER.error("Ignitis login error: %s", e)
-            raise ESOConnectionError(str(e)) from e
+            _LOGGER.error("Ignitis login error: %s", _safe(e))
+            raise ESOConnectionError(_safe(e)) from e
         try:
             return response.json()
         except ValueError as e:
@@ -124,11 +152,12 @@ class IgnitisClient:
             page = self.session.get(
                 SSO_LOGIN_PAGE,
                 params={"token": ticket, "callBackURL": callback},
+                timeout=REQUEST_TIMEOUT,
             )
             page.raise_for_status()
         except requests.exceptions.RequestException as e:
-            _LOGGER.error("Ignitis SSO login page error: %s", e)
-            raise ESOConnectionError(str(e)) from e
+            _LOGGER.error("Ignitis SSO login page error: %s", _safe(e))
+            raise ESOConnectionError(_safe(e)) from e
 
         match = SSO_TEMP_USER_DATAS_RE.search(page.text)
         if not match:
@@ -148,11 +177,12 @@ class IgnitisClient:
             auth = self.session.post(
                 post_url,
                 data={"Email": self.username, "Password": self.password},
+                timeout=REQUEST_TIMEOUT,
             )
             auth.raise_for_status()
         except requests.exceptions.RequestException as e:
-            _LOGGER.error("Ignitis SSO credential post error: %s", e)
-            raise ESOConnectionError(str(e)) from e
+            _LOGGER.error("Ignitis SSO credential post error: %s", _safe(e))
+            raise ESOConnectionError(_safe(e)) from e
 
         # Bad credentials re-render the form with a 200 instead of redirecting,
         # so the cookie is the only success signal.
@@ -168,13 +198,14 @@ class IgnitisClient:
             response = self.session.post(
                 SSO_EXTERNAL_LOGIN,
                 params={"provider": "IGNITIS", "ticket": ticket},
+                timeout=REQUEST_TIMEOUT,
             )
             if response.status_code in (401, 403):
                 raise ESOAuthError("Ignitis refused to exchange the SSO ticket")
             response.raise_for_status()
         except requests.exceptions.RequestException as e:
-            _LOGGER.error("Ignitis SSO ticket exchange error: %s", e)
-            raise ESOConnectionError(str(e)) from e
+            _LOGGER.error("Ignitis SSO ticket exchange error: %s", _safe(e))
+            raise ESOConnectionError(_safe(e)) from e
         try:
             return response.json()
         except ValueError as e:
@@ -194,7 +225,7 @@ class IgnitisClient:
         try:
             response.raise_for_status()
         except requests.exceptions.RequestException as e:
-            raise ESOConnectionError(str(e)) from e
+            raise ESOConnectionError(_safe(e)) from e
         try:
             return bool(response.json().get("token"))
         except ValueError as e:
@@ -231,14 +262,14 @@ class IgnitisClient:
                 GENERATION_URL.replace("{object}", obj),
                 params=params,
                 headers=headers,
+                timeout=REQUEST_TIMEOUT,
             )
             if response.status_code in (401, 403):
                 raise ESOAuthError("Ignitis rejected the API token")
             response.raise_for_status()
-            _LOGGER.debug("Got fetch response: %s", response.text)
             return response.json()
         except requests.exceptions.RequestException as e:
-            _LOGGER.error("Ignitis fetch error: %s", e)
+            _LOGGER.error("Ignitis fetch error: %s", _safe(e))
             return {}
 
     def fetch_dataset(self, obj: str, date: datetime) -> dict | None:
