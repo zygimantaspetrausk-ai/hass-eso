@@ -548,7 +548,7 @@ class ESOConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
 
         schema = vol.Schema(
-            {vol.Required(CONF_PASSWORD, default=entry.data.get(CONF_PASSWORD)): str}
+            {vol.Required(CONF_PASSWORD): str}
         ).extend(
             _imap_schema(
                 {
@@ -597,7 +597,8 @@ class ESOOptionsFlow(OptionsFlow):
 
         if user_input is not None:
             username = data[CONF_USERNAME]
-            password = user_input[CONF_PASSWORD]
+            # Mūsų namai: tuščias laukas = slaptažodis nekeičiamas (nesiunčiamas į naršyklę).
+            password = user_input.get(CONF_PASSWORD) or data[CONF_PASSWORD]
             if not is_eso:
                 auth_type = user_input[CONF_AUTH_TYPE]
             if is_eso and (not user_input.get(CONF_IMAP_USERNAME) or not user_input.get(CONF_IMAP_PASSWORD)):
@@ -633,7 +634,7 @@ class ESOOptionsFlow(OptionsFlow):
                 return self.async_create_entry(data={})
 
         schema = vol.Schema(
-            {vol.Required(CONF_PASSWORD, default=data.get(CONF_PASSWORD)): str}
+            {vol.Optional(CONF_PASSWORD): str}
         )
         if not is_eso:
             schema = schema.extend(

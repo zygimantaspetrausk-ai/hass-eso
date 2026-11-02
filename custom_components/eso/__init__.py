@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import random
 from collections.abc import Awaitable, Callable
@@ -25,7 +26,12 @@ from homeassistant.const import (
     UnitOfEnergy,
 )
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryAuthFailed, ServiceValidationError
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryError,
+    ServiceValidationError,
+)
+from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later, async_track_point_in_time
@@ -132,7 +138,6 @@ CONFIG_SCHEMA = vol.Schema(
                     AUTH_TYPES
                 ),
                 vol.Required(CONF_OBJECTS): cv.ensure_list(OBJECT_SCHEMA),
-                vol.Optional(CONF_IMAP): IMAP_SCHEMA,
             }
         )
     },
@@ -223,7 +228,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ESOConfigEntry) -> bool:
     """Set up ESO from a config entry."""
-    provider = entry.data.get(CONF_PROVIDER, DEFAULT_PROVIDER)
+    provider = entry.data.get(CONF_PROVIDER)
+    if provider != PROVIDER_IGNITIS:
+        # Mūsų namai kopija: tik Ignitis; ESO (su pašto skaitymu) pašalintas.
+        raise ConfigEntryError("Ši kopija palaiko tik Ignitis – ištrinkite ir pridėkite iš naujo")
 
     if provider == PROVIDER_IGNITIS:
         client: ESOClient | IgnitisClient = IgnitisClient(
@@ -262,7 +270,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ESOConfigEntry) -> bool:
     )
     max_retries = IGNITIS_MAX_RETRIES if provider == PROVIDER_IGNITIS else 1
 
+    import_lock = asyncio.Lock()
+
     async def async_import_generation(
+        now: datetime,
+        retry: int = 0,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> None:
+        # Mūsų namai: vienu metu tik vienas importas (bendras requests.Session).
+        if import_lock.locked():
+            _LOGGER.warning("Import already running, skipping this request")
+            return
+        async with import_lock:
+            await _async_import_generation(now, retry, date_from, date_to)
+
+    async def _async_import_generation(
         now: datetime,
         retry: int = 0,
         date_from: datetime | None = None,
@@ -284,7 +307,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ESOConfigEntry) -> bool:
             _LOGGER.error("%s login error: %s", provider.upper(), err)
             all_failed = True
         for obj in objects if not auth_failed else []:
-            _LOGGER.info("Fetching %s dataset [%s]", provider.upper(), obj[CONF_NAME])
+            _LOGGER.info("Fetching %s dataset [%s]", provider.upper(), obj[CONF_ID])
             try:
                 if date_from is not None:
                     await hass.async_add_executor_job(
@@ -296,11 +319,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ESOConfigEntry) -> bool:
                 else:
                     await hass.async_add_executor_job(client.fetch_dataset, obj[CONF_ID], now)
             except ESOAuthError as err:
-                _LOGGER.error("Authentication failed for %s: %s. Reconfigure the integration to update credentials.", obj[CONF_NAME], err)
+                _LOGGER.error("Authentication failed for %s: %s. Reconfigure the integration to update credentials.", obj[CONF_ID], err)
                 auth_failed = True
                 break
             except Exception as err:
-                _LOGGER.error("%s fetch dataset error [%s]: %s", provider.upper(), obj[CONF_NAME], err)
+                _LOGGER.error("%s fetch dataset error [%s]: %s", provider.upper(), obj[CONF_ID], err)
                 all_failed = True
                 continue
             dataset = client.get_dataset(obj[CONF_ID])
@@ -312,7 +335,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ESOConfigEntry) -> bool:
                 and date_from is None
                 and _need_retry(dataset, target_day)
             ):
-                _LOGGER.warning("Received incomplete data for %s, will retry later", obj[CONF_NAME])
+                _LOGGER.warning("Received incomplete data for %s, will retry later", obj[CONF_ID])
                 all_failed = True
                 continue
             await async_insert_statistics(hass, obj, dataset)
@@ -341,7 +364,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ESOConfigEntry) -> bool:
                         async_dispatcher_send(
                             hass, signal_stored_updated(entry.entry_id)
                         )
-            _LOGGER.info("Import completed for %s", obj[CONF_NAME])
+            _LOGGER.info("Import completed for %s", obj[CONF_ID])
         if auth_failed:
             return
         # Range (backfill) imports are user-invoked one-offs — no silent retry.
@@ -419,6 +442,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError("date_to requires date_from")
         if date_from and date_to and date_from > date_to:
             raise ServiceValidationError("date_from must not be after date_to")
+        # Mūsų namai: riboti istorijos importą (Ignitis apkrova / blokavimas).
+        today = dt_util.now().date()
+        if date_from and date_from < today - timedelta(days=3 * 366):
+            raise ServiceValidationError("date_from: ne seniau nei 3 metai")
+        if date_from and ((date_to or today) - date_from).days > 400:
+            raise ServiceValidationError("Vienu kartu – ne daugiau 400 dienų")
         kwargs = {}
         if date_from:
             kwargs = {
@@ -435,7 +464,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
         for callback in targets:
             await callback(dt_util.now(), **kwargs)
 
-    hass.services.async_register(
+    async_register_admin_service(
+        hass,
         DOMAIN,
         SERVICE_IMPORT_NOW,
         async_handle_import_now,
@@ -654,7 +684,7 @@ async def async_insert_export_balance_statistics(
 ) -> None:
     balance = consumption_dataset.get(EXPORT_BALANCE_KEY) if consumption_dataset else None
     if balance is None:
-        _LOGGER.warning("Received empty export balance data for %s", obj[CONF_NAME])
+        _LOGGER.warning("Received empty export balance data for %s", obj[CONF_ID])
         return
     statistic_id = f"{DOMAIN}:energy_{CONF_EXPORT_BALANCE}_{obj[CONF_ID]}"
     metadata = StatisticMetaData(

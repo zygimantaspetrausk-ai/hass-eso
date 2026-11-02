@@ -36,9 +36,12 @@ _LOGGER = logging.getLogger(__name__)
 REQUEST_TIMEOUT = 30
 
 
+ALLOWED_HOSTS = {"e.ignitis.lt", "energy-smart-api.ignitis.lt"}
+
+
 def _allowed_host(url: str) -> bool:
-    host = (urlsplit(url).hostname or "").lower()
-    return host == "ignitis.lt" or host.endswith(".ignitis.lt")
+    parts = urlsplit(url)
+    return parts.scheme == "https" and (parts.hostname or "").lower() in ALLOWED_HOSTS
 
 
 def _host_guard(response: requests.Response, *args, **kwargs) -> None:
@@ -91,7 +94,7 @@ class IgnitisClient:
                 continue
             _LOGGER.debug("Found Ignitis object: %s", uoid)
             self._objects.append(
-                {"id": str(uoid), "name": obj.get("address") or str(uoid)}
+                {"id": str(uoid), "name": f"Ignitis {uoid}"}
             )
 
     def _post_direct_login(self) -> requests.Response:
@@ -314,7 +317,12 @@ class IgnitisClient:
             chunks.append((start, end))
             start = end + timedelta(days=1)
         gaps: list[str] = []
+        failures = 0
         for index, (start, end) in enumerate(chunks, start=1):
+            # Mūsų namai: po 3 nepavykusių užklausų iš eilės – stop (kad Ignitis neužblokuotų).
+            if failures >= 3:
+                gaps.append(f"{start}..{last}: stopped after 3 failed requests")
+                break
             if index > 1:
                 time.sleep(1)
             _LOGGER.info(
@@ -332,6 +340,7 @@ class IgnitisClient:
                 if raw
                 else "request failed"
             )
+            failures = 0 if raw else failures + 1
             if gap:
                 _LOGGER.warning(
                     "Ignitis: chunk %s..%s is incomplete (%s)", start, end, gap
@@ -402,5 +411,5 @@ class IgnitisClient:
                 result[POWER_CONSUMED][timestamp] = record.get("consumed") or 0.0
                 result[POWER_RETURNED][timestamp] = record.get("supplied") or 0.0
             except Exception as e:  # noqa: BLE001
-                _LOGGER.error("Failed to parse dataset record %s: %s", record, e)
+                _LOGGER.error("Failed to parse dataset record: %s", type(e).__name__)
         return result
